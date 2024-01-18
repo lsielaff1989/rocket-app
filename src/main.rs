@@ -4,13 +4,15 @@ mod auth;
 mod schema;
 mod models;
 
-use diesel::prelude::*;
+use diesel::{prelude::*, result};
 use auth::BasicAuth;
 use rocket::serde::json::{Value, json, Json};
 use rocket::response::status;
 use rocket_sync_db_pools::database;
 use schema::rustaceans;
 use models::{ Rustacean, NewRustaceans };
+
+
 
 
 #[database("sqlite")]
@@ -25,8 +27,11 @@ async fn get_rustaceans(_auth: BasicAuth, db: DbConn) -> Value{
     }).await
 }
 #[get("/rustaceans/<id>")]
-fn view_rustacean(id: i32, _auth: BasicAuth) -> Value{
-    json!([{"id": id, "name": "John Doe", "email": "john@doe.com" }])
+async fn view_rustacean(id: i32, _auth: BasicAuth, db: DbConn) -> Value{
+    db.run(move |c| {
+       let rustacean = rustaceans::table.find(id).get_result::<Rustacean>(c).expect("DB Error when selecting");
+       json!(rustacean)
+    }).await
 }
 #[post("/rustaceans", format = "json", data = "<new_rustacean>")]
 async fn create_rustacean(_auth: BasicAuth, db: DbConn, new_rustacean: Json<NewRustaceans>) -> Value{
@@ -35,13 +40,24 @@ async fn create_rustacean(_auth: BasicAuth, db: DbConn, new_rustacean: Json<NewR
        json!(result)
     }).await
 }
-#[put("/rustaceans/<id>")]
-fn update_rustacean(id: i32, _auth: BasicAuth) -> Value{
-    json!([{"id": id, "name": "John Doe", "email": "john@doe.com" }])
+#[put("/rustaceans/<id>", format = "json", data = "<rustacean>")]
+async fn update_rustacean(id: i32, _auth: BasicAuth, db: DbConn, rustacean: Json<Rustacean>) -> Value{
+    db.run(move |c| {
+        let result = diesel::update(rustaceans::table.find(id))
+        .set((
+            rustaceans::name.eq(rustacean.name.to_owned()),
+            rustaceans::email.eq(rustacean.email.to_owned())
+
+        )).execute(c).expect("DB Error when updating");
+        json!((result))
+    }).await
 }
 #[delete("/rustaceans/<id>")]
-fn delete_rustacean(id: i32, _auth: BasicAuth) -> status::NoContent {
-    status::NoContent
+async fn delete_rustacean(id: i32, _auth: BasicAuth, db: DbConn) -> status::NoContent {
+    db.run(move |c| {
+        diesel::delete(rustaceans::table.find(id)).execute(c).expect("DB Error when deleting");
+        status::NoContent
+    }).await
 }
 #[catch(422)]
 fn unprocessable_content() -> Value {
