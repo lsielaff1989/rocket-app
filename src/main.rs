@@ -1,27 +1,39 @@
 #[macro_use] extern crate rocket;
 
 mod auth;
+mod schema;
+mod models;
 
+use diesel::prelude::*;
 use auth::BasicAuth;
-use rocket::serde::json::{Value, json};
+use rocket::serde::json::{Value, json, Json};
 use rocket::response::status;
 use rocket_sync_db_pools::database;
+use schema::rustaceans;
+use models::{ Rustacean, NewRustaceans };
+
 
 #[database("sqlite")]
 
 struct DbConn(diesel::SqliteConnection);
 
 #[get("/rustaceans")]
-fn get_rustaceans(_auth: BasicAuth, db: DbConn) -> Value{
-    json!([{"id": 1, "name": "John Doe" }, {"id": 2, "name": "John Doe again"}])
+async fn get_rustaceans(_auth: BasicAuth, db: DbConn) -> Value{
+    db.run(|c| {
+        let rustaceans = rustaceans::table.order(rustaceans::id.desc()).limit(1000).load::<Rustacean>(c).expect("DB error");
+        json!(rustaceans)
+    }).await
 }
 #[get("/rustaceans/<id>")]
 fn view_rustacean(id: i32, _auth: BasicAuth) -> Value{
     json!([{"id": id, "name": "John Doe", "email": "john@doe.com" }])
 }
-#[post("/rutaceans")]
-fn create_rustacean(_auth: BasicAuth) -> Value{
-    json!([{"id": 3, "name": "John Doe", "email": "john@doe.com" }])
+#[post("/rustaceans", format = "json", data = "<new_rustacean>")]
+async fn create_rustacean(_auth: BasicAuth, db: DbConn, new_rustacean: Json<NewRustaceans>) -> Value{
+    db.run(|c| {
+       let result = diesel::insert_into(rustaceans::table).values(new_rustacean.into_inner()).execute(c).expect("DB error when inserting");
+       json!(result)
+    }).await
 }
 #[put("/rustaceans/<id>")]
 fn update_rustacean(id: i32, _auth: BasicAuth) -> Value{
@@ -30,6 +42,10 @@ fn update_rustacean(id: i32, _auth: BasicAuth) -> Value{
 #[delete("/rustaceans/<id>")]
 fn delete_rustacean(id: i32, _auth: BasicAuth) -> status::NoContent {
     status::NoContent
+}
+#[catch(422)]
+fn unprocessable_content() -> Value {
+    json!("Unprocessable Content!")
 }
 
 #[catch(404)]
@@ -54,7 +70,8 @@ async fn main() {
         ])
         .register("/", catchers![
             not_found,
-            not_authorised
+            not_authorised,
+            unprocessable_content
         ])
         .attach(DbConn::fairing())
         .launch()
