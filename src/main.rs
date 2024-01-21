@@ -7,6 +7,9 @@ mod repositorys;
 
 
 use auth::BasicAuth;
+use diesel_migrations::EmbeddedMigrations;
+use rocket::{Rocket, Build};
+use rocket::fairing::AdHoc;
 use rocket::http::Status;
 use rocket::serde::json::{Value, json, Json};
 use rocket::response::status::{self, Custom};
@@ -82,6 +85,17 @@ fn not_authorised() -> Value {
     json!("Not Authorised")
 }
 
+async fn run_db_migrations(rocket: Rocket<Build>) -> Rocket<Build> {
+    use diesel_migrations::{embed_migrations, EmbeddedMigration, MigrationHarness};
+
+    const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+    DbConn::get_one(&rocket).await.expect("Unable to retrive connection").run(|c| {
+        c.run_pending_migrations(MIGRATIONS).expect("Migrations Faild");
+    }
+    ).await;
+    rocket
+}
+
 #[rocket::main]
 async fn main() {
     let _ = rocket::build()
@@ -98,6 +112,7 @@ async fn main() {
             unprocessable_content
         ])
         .attach(DbConn::fairing())
+        .attach(AdHoc::on_ignite("Diesel migrations", run_db_migrations))
         .launch()
         .await;
 }
